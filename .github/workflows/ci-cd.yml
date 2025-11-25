@@ -11,7 +11,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: hacperme/sonicwave
 
 jobs:
   # Rust 构建和检查 (Linux)
