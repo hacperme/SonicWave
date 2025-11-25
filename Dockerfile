@@ -1,5 +1,5 @@
 # 多阶段构建 Rust 静态文件服务器
-FROM rust:1.83-alpine AS builder
+FROM rust:1.91-alpine AS builder
 
 # 安装构建依赖
 RUN apk add --no-cache musl-dev
