@@ -1,7 +1,6 @@
 .git
 .gitignore
 target/
-Cargo.lock
 *.pyc
 __pycache__/
 server.py
