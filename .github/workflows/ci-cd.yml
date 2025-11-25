@@ -14,9 +14,9 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Rust 构建和检查
-  rust-build:
-    name: Rust Build & Check
+  # Rust 构建和检查 (Linux)
+  rust-build-linux:
+    name: Rust Build & Check (Linux)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -59,11 +59,56 @@ jobs:
           path: target/release/sonic-wave
           retention-days: 7
 
-  # Docker 镜像构建和推送
+  # Rust 构建和检查 (Windows)
+  rust-build-windows:
+    name: Rust Build & Check (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build release
+        run: cargo build --release --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonic-wave-windows-x86_64
+          path: target/release/sonic-wave.exe
+          retention-days: 7
+
+  # Docker 镜像构建和推送 (仅 Linux)
   docker-build:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: rust-build
+    needs: rust-build-linux
     permissions:
       contents: read
       packages: write

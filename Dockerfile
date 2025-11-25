@@ -1,5 +1,8 @@
 # 多阶段构建 Rust 静态文件服务器
-FROM rust:1.75-slim AS builder
+FROM rust:1.83-alpine AS builder
+
+# 安装构建依赖
+RUN apk add --no-cache musl-dev
 
 WORKDIR /build
 
@@ -14,16 +17,14 @@ RUN mkdir src && \
 COPY src ./src
 RUN touch src/main.rs && cargo build --release
 
-# 最终镜像 - 使用精简的 Debian
-FROM debian:bookworm-slim
+# 最终镜像 - 使用精简的 Alpine
+FROM alpine:3.19
 
 # 安装 wget 用于健康检查
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends wget && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache wget
 
 # 创建非 root 用户
-RUN groupadd -r sonicwave && useradd -r -g sonicwave sonicwave
+RUN addgroup -g 1000 sonicwave && adduser -D -u 1000 -G sonicwave sonicwave
 
 WORKDIR /app
 
@@ -48,11 +49,10 @@ EXPOSE 8089
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/bin/sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:8089/index.html || exit 1"]
+    CMD ["/bin/sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:8089/ || exit 1"]
 
 # 设置环境变量
 ENV PORT=8089
-ENV STATIC_DIR=/app
 
 # 运行服务器
 CMD ["/app/sonic-wave"]
