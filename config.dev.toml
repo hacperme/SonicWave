@@ -1,0 +1,4 @@
+# 开发环境配置（禁用缓存）
+port = 8089
+static_dir = "."
+cache_control = "no-cache, no-store, must-revalidate"

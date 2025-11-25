@@ -1,0 +1,14 @@
+.git
+.gitignore
+target/
+Cargo.lock
+*.pyc
+__pycache__/
+server.py
+config.dev.toml
+README.md
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

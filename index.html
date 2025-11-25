@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic Wave - 音频转换工具</title>
+    <link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+
+<div class="container">
+    <h2>🎵 Sonic Wave - 音频转换工具</h2>
+    
+    <!-- 拖拽上传区域 -->
+    <div class="drop-zone" id="drop-zone">
+        <div class="drop-zone-text">📁 拖拽文件到此处或点击选择</div>
+        <div class="drop-zone-hint">支持 MP3/WAV/M4A/AAC/OGG/FLAC，可多选</div>
+        <div class="drop-zone-hint hint">💡 单文件≤100MB，总大小≤500MB</div>
+    </div>
+    
+    <div class="form-group" style="display: none;">
+        <input type="file" id="uploader" accept="audio/*" multiple>
+    </div>
+
+    <div id="file-list" class="hidden" style="margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 6px;">
+        <h4 style="margin-bottom: 10px;">已选择 <span id="file-count">0</span> 个文件</h4>
+        <div id="file-items" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
+
+    <div id="original-info" class="original-info hidden">
+        <h4>文件信息：</h4>
+        <table>
+            <tr><td>文件名:</td><td id="info-name">N/A</td></tr>
+            <tr><td>时长:</td><td id="info-duration">N/A</td></tr>
+            <tr><td>采样率:</td><td id="info-samplerate">N/A</td></tr>
+            <tr><td>声道:</td><td id="info-channels">N/A</td></tr>
+            <tr><td>原始比特率:</td><td id="info-bitrate">N/A</td></tr>
+        </table>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <label>2. 输出格式与参数</label>
+        <div class="settings-grid">
+            
+            <select id="output-format">
+                <option value="mp3">MP3</option>
+                <option value="wav">WAV (无损)</option>
+                <option value="aac">AAC/M4A</option>
+                <option value="ogg">OGG Vorbis</option>
+                <option value="flac">FLAC (无损)</option>
+            </select>
+            
+            <select id="output-channels">
+                <option value="">声道 (保持不变)</option>
+                <option value="1">单声道 (Mono)</option>
+                <option value="2">立体声 (Stereo)</option>
+            </select>
+            
+            <select id="output-samplerate">
+                <option value="">采样率 (保持不变)</option>
+                <option value="48000">48 kHz (高清标准)</option>
+                <option value="44100" selected>44.1 kHz (CD 标准)</option>
+                <option value="32000">32 kHz</option>
+                <option value="24000">24 kHz</option>
+                <option value="22050">22.05 kHz</option>
+                <option value="16000">16 kHz (语音)</option>
+                <option value="11025">11.025 kHz</option>
+                <option value="8000">8 kHz (电话)</option>
+            </select>
+
+            <select id="output-bitrate">
+                <option value="">比特率 (保持不变)</option>
+                <option value="320k">320 kbps (最高质量)</option>
+                <option value="256k">256 kbps (高品质)</option>
+                <option value="192k">192 kbps (高)</option>
+                <option value="160k">160 kbps</option>
+                <option value="128k" selected>128 kbps (标准)</option>
+                <option value="112k">112 kbps</option>
+                <option value="96k">96 kbps (中)</option>
+                <option value="80k">80 kbps</option>
+                <option value="64k">64 kbps (低)</option>
+                <option value="56k">56 kbps</option>
+                <option value="48k">48 kbps</option>
+                <option value="32k">32 kbps (语音)</option>
+                <option value="24k">24 kbps</option>
+                <option value="16k">16 kbps (最低)</option>
+            </select>
+        </div>
+        <div style="margin-top: 10px; font-size: 13px; color: #666;">
+            <span id="format-hint">💡 提示: MP3 格式支持比特率设置，WAV/FLAC 为无损格式</span>
+        </div>
+    </div>
+    
+    <!-- 进度条 -->
+    <div class="progress-container" id="progress-container">
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-text" id="progress-text">0 / 0 已完成</div>
+    </div>
+
+    <button id="compress-btn" disabled style="margin-top: 20px;">加载 FFmpeg 核心中...</button>
+
+    <div id="batch-results" class="batch-results hidden">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">转换结果</h4>
+            <button id="download-all-btn" class="success-btn" style="display: none; padding: 8px 16px; font-size: 14px;">📦 打包下载全部</button>
+        </div>
+        <div id="results-container"></div>
+    </div>
+
+    <div id="download-area" class="hidden">
+        <p>压缩完成！</p>
+        <a id="download-link" class="success-btn" href="#" download>下载压缩后的 MP3</a>
+        <p id="size-info" style="font-size: 0.9em; color: #666; margin-top: 10px;"></p>
+    </div>
+
+    <div id="log">正在初始化...</div>
+</div>
+
+<script src="./assets/ffmpeg.js"></script>
+<script src="./assets/util.js"></script>
+<script src="./assets/jszip.min.js"></script>
+
+<script>
+    // 导入全局命名空间中的类（FFmpegWASM 和 FFmpegUtil 是 UMD 文件定义的全局对象）
+    const { FFmpeg } = FFmpegWASM;
+    const { fetchFile } = FFmpegUtil;
+    
+    let ffmpeg = null;
+    const logEl = document.getElementById('log');
+    const btn = document.getElementById('compress-btn');
+    const uploader = document.getElementById('uploader');
+    const downloadArea = document.getElementById('download-area');
+    const downloadLink = document.getElementById('download-link');
+    const infoArea = document.getElementById('original-info');
+    const fileListArea = document.getElementById('file-list');
+    const fileItems = document.getElementById('file-items');
+    const fileCount = document.getElementById('file-count');
+    const batchResults = document.getElementById('batch-results');
+    const resultsContainer = document.getElementById('results-container');
+    const downloadAllBtn = document.getElementById('download-all-btn');
+    const formatHint = document.getElementById('format-hint');
+    const dropZone = document.getElementById('drop-zone');
+    const progressContainer = document.getElementById('progress-container');
+    const progressFill = document.getElementById('progress-fill');
+    const progressText = document.getElementById('progress-text');
+
+    // 新增的输入元素
+    const outputFormat = document.getElementById('output-format');
+    const outputBitrate = document.getElementById('output-bitrate');
+    const outputSamplerate = document.getElementById('output-samplerate');
+    const outputChannels = document.getElementById('output-channels');
+    
+    // 拖拽上传功能
+    dropZone.addEventListener('click', () => uploader.click());
+    
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+    });
+    
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+    });
+    
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        uploader.files = e.dataTransfer.files;
+        displayFileList();
+    });
+
+    let selectedFiles = [];
+    
+    // 文件大小限制（字节）
+    const MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+    const MAX_TOTAL_SIZE = 500 * 1024 * 1024; // 500MB
+    
+    // 错误消息映射
+    const ERROR_MESSAGES = {
+        'out of memory': '❌ 文件过大导致内存不足，建议：\n  • 使用较小的文件\n  • 降低输出质量参数\n  • 分段处理',
+        'invalid data': '❌ 文件格式不支持或文件已损坏，请检查文件完整性',
+        'timeout': '❌ 处理超时，建议：\n  • 缩短音频长度\n  • 分段处理\n  • 降低输出质量',
+        'no such file': '❌ 文件读取失败，请重新选择文件',
+        'codec': '❌ 编码器错误，请尝试其他输出格式'
+    };
+    
+    const getFriendlyError = (error) => {
+        const message = error.message || error.toString();
+        for (const [key, msg] of Object.entries(ERROR_MESSAGES)) {
+            if (message.toLowerCase().includes(key)) {
+                return msg;
+            }
+        }
+        return `❌ 处理失败: ${message}`;
+    };
+
+    // 格式配置
+    const formatConfig = {
+        mp3: { ext: 'mp3', codec: 'libmp3lame', supportsBitrate: true, hint: '💡 MP3 - 有损压缩，支持比特率设置，兼容性最好' },
+        wav: { ext: 'wav', codec: 'pcm_s16le', supportsBitrate: false, hint: '💡 WAV - 无损格式，文件较大，音质最佳' },
+        aac: { ext: 'm4a', codec: 'aac', supportsBitrate: true, hint: '💡 AAC/M4A - 有损压缩，音质优于同比特率MP3，现代设备支持好' },
+        ogg: { ext: 'ogg', codec: 'libvorbis', supportsBitrate: true, hint: '💡 OGG Vorbis - 开源有损格式，音质好，文件小' },
+        flac: { ext: 'flac', codec: 'flac', supportsBitrate: false, hint: '💡 FLAC - 无损压缩，比WAV小30-50%，保真音质' }
+    };
+
+    // 格式切换时更新提示和比特率可用性
+    outputFormat.addEventListener('change', () => {
+        const format = formatConfig[outputFormat.value];
+        formatHint.textContent = format.hint;
+        outputBitrate.disabled = !format.supportsBitrate;
+        if (!format.supportsBitrate) {
+            outputBitrate.value = '';
+        }
+    });
+
+
+    const log = (message) => {
+        logEl.innerHTML += `\n${message}`;
+        logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    // ------------------------------------
+    // 1. 初始化 FFmpeg (使用绝对路径加载)
+    // ------------------------------------
+    const loadFFmpeg = async () => {
+        ffmpeg = new FFmpeg();
+        
+        ffmpeg.on('log', ({ message }) => log(message));
+        ffmpeg.on('progress', ({ progress }) => log(`处理进度: ${(progress * 100).toFixed(1)}%`));
+
+        try {
+            // 使用绝对路径加载核心文件 (修复了 Worker 路径问题)
+            await ffmpeg.load({
+                coreURL: '/assets/ffmpeg-core.js',
+                wasmURL: '/assets/ffmpeg-core.wasm',
+            });
+            
+            log('FFmpeg 核心加载成功！请选择文件。');
+            btn.innerText = '开始压缩';
+            btn.disabled = false;
+        } catch (e) {
+            log(`加载失败: ${e.message || e}`);
+            log("请检查服务器配置或 assets 文件夹。");
+            console.error(e);
+        }
+    };
+
+    // ------------------------------------
+    // 文件选择处理
+    // ------------------------------------
+    const displayFileList = async () => {
+        selectedFiles = Array.from(uploader.files);
+        
+        if (selectedFiles.length === 0) {
+            fileListArea.classList.add('hidden');
+            infoArea.classList.add('hidden');
+            batchResults.classList.add('hidden');
+            return;
+        }
+        
+        // 验证文件大小
+        let totalSize = 0;
+        let hasOversizedFile = false;
+        
+        for (const file of selectedFiles) {
+            totalSize += file.size;
+            if (file.size > MAX_SINGLE_FILE_SIZE) {
+                hasOversizedFile = true;
+                alert(`文件 "${file.name}" 超过 100MB 限制 (${(file.size / 1024 / 1024).toFixed(2)} MB)\n建议使用较小的文件。`);
+            }
+        }
+        
+        if (hasOversizedFile) {
+            uploader.value = '';
+            return;
+        }
+        
+        if (totalSize > MAX_TOTAL_SIZE) {
+            alert(`总文件大小 ${(totalSize / 1024 / 1024).toFixed(2)} MB 超过 500MB 限制\n请减少文件数量或选择较小的文件。`);
+            uploader.value = '';
+            return;
+        }
+        
+        // 清除之前的转换结果
+        resultsContainer.innerHTML = '';
+        batchResults.classList.add('hidden');
+        downloadAllBtn.style.display = 'none';
+        
+        fileCount.textContent = selectedFiles.length;
+        fileListArea.classList.remove('hidden');
+        infoArea.classList.add('hidden');
+        
+        // 创建文件列表项
+        fileItems.innerHTML = selectedFiles.map((file, index) => {
+            const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+            return `
+                <div class="file-item" data-index="${index}">
+                    <div class="header">
+                        <span class="name">${file.name}</span>
+                        <span class="size">${sizeMB} MB</span>
+                        <span class="status status-pending">解析中...</span>
+                    </div>
+                    <div class="metadata" id="metadata-${index}">
+                        <span>⏱ <strong id="duration-${index}">-</strong></span>
+                        <span>🎵 <strong id="samplerate-${index}">-</strong></span>
+                        <span>📻 <strong id="channels-${index}">-</strong></span>
+                        <span>💿 <strong id="bitrate-${index}">-</strong></span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        btn.innerText = `批量压缩 (${selectedFiles.length} 个文件)`;
+        
+        // 异步解析所有文件的元数据
+        parseAllFilesMetadata();
+    };
+    
+    const getFileExtension = (filename) => {
+        return filename.split('.').pop().toLowerCase();
+    };
+    
+    const parseAllFilesMetadata = async () => {
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const file = selectedFiles[i];
+            const inputName = `temp_${i}.` + file.name.split('.').pop();
+            
+            try {
+                await ffmpeg.writeFile(inputName, await fetchFile(file));
+                
+                // 执行 -i 获取元数据
+                try {
+                    await ffmpeg.exec(['-i', inputName]);
+                } catch (e) {
+                    // 正常会失败
+                }
+                
+                // 从日志解析
+                const logs = logEl.innerText;
+                const metadata = parseMetadata(logs);
+                
+                // 更新对应文件的显示
+                document.getElementById(`duration-${i}`).textContent = metadata.duration;
+                document.getElementById(`samplerate-${i}`).textContent = metadata.sampleRate;
+                document.getElementById(`channels-${i}`).textContent = metadata.channels;
+                document.getElementById(`bitrate-${i}`).textContent = metadata.bitrate;
+                
+                // 显示元数据区域
+                document.getElementById(`metadata-${i}`).classList.add('loaded');
+                
+                // 更新状态
+                const statusEl = fileItems.querySelector(`[data-index="${i}"] .status`);
+                statusEl.className = 'status status-pending';
+                statusEl.textContent = '等待处理';
+                
+                // 清空日志
+                logEl.innerHTML = `已解析 ${i + 1}/${selectedFiles.length} 个文件...`;
+                
+                // 清理临时文件
+                await ffmpeg.deleteFile(inputName);
+                
+            } catch (error) {
+                console.error(`解析 ${file.name} 失败:`, error);
+                const statusEl = fileItems.querySelector(`[data-index="${i}"] .status`);
+                statusEl.className = 'status status-error';
+                statusEl.textContent = '解析失败';
+            }
+        }
+        
+        logEl.innerHTML = '所有文件信息解析完成，可以开始压缩。';
+    };
+    
+    const updateFileStatus = (index, status, message = '') => {
+        const item = fileItems.querySelector(`[data-index="${index}"]`);
+        if (!item) return;
+        
+        const statusEl = item.querySelector('.status');
+        statusEl.className = 'status';
+        
+        switch(status) {
+            case 'processing':
+                statusEl.classList.add('status-processing');
+                statusEl.textContent = '处理中...';
+                break;
+            case 'done':
+                statusEl.classList.add('status-done');
+                statusEl.textContent = '✓ 完成';
+                break;
+            case 'error':
+                statusEl.classList.add('status-error');
+                statusEl.textContent = '✗ 失败';
+                break;
+        }
+    };
+
+    // ------------------------------------
+    // 2. 解析原始文件信息 (修复版)
+    // ------------------------------------
+    const parseMetadata = (logOutput) => {
+        // stderr 是 Uint8Array，需要转换为字符串
+        let logString = '';
+        if (logOutput instanceof Uint8Array) {
+            logString = new TextDecoder().decode(logOutput);
+        } else if (typeof logOutput === 'string') {
+            logString = logOutput;
+        }
+        
+        if (!logString) {
+            return { duration: 'N/A', sampleRate: 'N/A', channels: 'N/A', bitrate: 'N/A' };
+        }
+        
+        const metadata = {};
+        
+        // Duration: 匹配 "Duration: 00:28:33.79"
+        const durationMatch = logString.match(/Duration:\s*(\d{2}:\d{2}:\d{2}\.\d+)/);
+        metadata.duration = durationMatch ? durationMatch[1] : 'N/A';
+
+        // Sample Rate & Channels: 匹配 "44100 Hz, mono" 或 "48000 Hz, stereo"
+        const streamMatch = logString.match(/(\d+)\s*Hz,\s*(mono|stereo|5\.1|quad)/i);
+        if (streamMatch) {
+            const sampleRateHz = parseInt(streamMatch[1]);
+            metadata.sampleRate = `${(sampleRateHz / 1000).toFixed(1)} kHz`;
+            metadata.channels = streamMatch[2].charAt(0).toUpperCase() + streamMatch[2].slice(1);
+        } else {
+            metadata.sampleRate = 'N/A';
+            metadata.channels = 'N/A';
+        }
+
+        // Bitrate: 匹配 "bitrate: 64 kb/s"
+        const bitrateMatch = logString.match(/bitrate:\s*(\d+)\s*kb\/s/i);
+        metadata.bitrate = bitrateMatch ? `${bitrateMatch[1]} kbps` : 'N/A';
+        
+        return metadata;
+    };
+
+    // ------------------------------------
+    // 3. 批量压缩逻辑 
+    // ------------------------------------
+    const compressBatch = async () => {
+        if (selectedFiles.length === 0) {
+            return alert('请先选择文件');
+        }
+
+        btn.disabled = true;
+        btn.innerText = '批量压缩中...';
+        downloadArea.classList.add('hidden');
+        resultsContainer.innerHTML = '';
+        batchResults.classList.remove('hidden');
+        downloadAllBtn.style.display = 'none';
+        progressContainer.style.display = 'block';
+        
+        logEl.innerHTML = '--- 开始批量处理 ---';
+
+        const results = [];
+        const format = formatConfig[outputFormat.value]; // 提到外层
+        
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const file = selectedFiles[i];
+            
+            // 更新进度
+            const progress = ((i / selectedFiles.length) * 100).toFixed(0);
+            progressFill.style.width = progress + '%';
+            progressText.textContent = `${i} / ${selectedFiles.length} 已完成`;
+            
+            updateFileStatus(i, 'processing');
+            log(`\n[${i + 1}/${selectedFiles.length}] 处理: ${file.name}`);
+            
+            try {
+                const result = await compressSingleFileWithRetry(file);
+                results.push(result);
+                updateFileStatus(i, 'done');
+                
+                // 添加到结果区域
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-item';
+                resultDiv.innerHTML = `
+                    <div class="filename">${file.name} → ${result.filename}</div>
+                    <div class="info">
+                        原始: ${(file.size / 1024 / 1024).toFixed(2)} MB (${getFileExtension(file.name).toUpperCase()}) → 
+                        转换后: ${(result.blob.size / 1024 / 1024).toFixed(2)} MB (${format.ext.toUpperCase()})
+                        ${file.size > result.blob.size ? 
+                            `(减小 ${((1 - result.blob.size / file.size) * 100).toFixed(1)}%)` : 
+                            `(增大 ${((result.blob.size / file.size - 1) * 100).toFixed(1)}%)`}
+                    </div>
+                    <a href="${result.url}" download="${result.filename}">📥 下载</a>
+                `;
+                resultsContainer.appendChild(resultDiv);
+                
+            } catch (error) {
+                updateFileStatus(i, 'error');
+                const friendlyError = getFriendlyError(error);
+                log(`✗ ${file.name} 失败:\n${friendlyError}`);
+                
+                const resultDiv = document.createElement('div');
+                resultDiv.className = 'result-item';
+                resultDiv.style.borderLeftColor = '#dc3545';
+                resultDiv.innerHTML = `
+                    <div class="filename">${file.name}</div>
+                    <div class="info" style="color: #dc3545; white-space: pre-line;">${friendlyError}</div>
+                `;
+                resultsContainer.appendChild(resultDiv);
+            }
+        }
+        
+        // 完成进度
+        progressFill.style.width = '100%';
+        progressText.textContent = `${selectedFiles.length} / ${selectedFiles.length} 已完成`;
+        
+        log(`\n--- 批量处理完成 (成功: ${results.length}/${selectedFiles.length}) ---`);
+        btn.disabled = false;
+        btn.innerText = `批量压缩 (${selectedFiles.length} 个文件)`;
+        
+        // 如果有多个成功的文件，显示打包下载按钮
+        if (results.length > 1) {
+            downloadAllBtn.style.display = 'inline-block';
+            downloadAllBtn.onclick = () => downloadAsZip(results);
+        }
+    };
+
+    // ------------------------------------
+    // 4. 打包下载功能
+    // ------------------------------------
+    const downloadAsZip = async (results) => {
+        log('\n正在打包文件...');
+        downloadAllBtn.disabled = true;
+        downloadAllBtn.textContent = '📦 打包中...';
+        
+        try {
+            const zip = new JSZip();
+            
+            for (const result of results) {
+                // 从 blob 中读取数据并添加到 zip
+                const arrayBuffer = await result.blob.arrayBuffer();
+                zip.file(result.filename, arrayBuffer);
+            }
+            
+            // 生成 zip 文件
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            
+            // 创建下载链接
+            const url = URL.createObjectURL(zipBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `compressed_batch_${Date.now()}.zip`;
+            a.click();
+            
+            URL.revokeObjectURL(url);
+            log('打包完成！');
+            
+        } catch (error) {
+            log(`打包失败: ${error.message}`);
+            alert('打包失败: ' + error.message);
+        } finally {
+            downloadAllBtn.disabled = false;
+            downloadAllBtn.textContent = '📦 打包下载全部';
+        }
+    };
+    
+    // 带重试的压缩函数
+    const compressSingleFileWithRetry = async (file, maxRetries = 2) => {
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return await compressSingleFile(file);
+            } catch (error) {
+                if (attempt < maxRetries) {
+                    log(`⚠️ 第 ${attempt + 1} 次尝试失败，重试中...`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                } else {
+                    throw error;
+                }
+            }
+        }
+    };
+
+    const compressSingleFile = async (file) => {
+        const inputExt = getFileExtension(file.name);
+        const inputName = 'input.' + inputExt;
+        const format = formatConfig[outputFormat.value];
+        const outputName = 'output.' + format.ext;
+        
+        try {
+            // 写入文件到内存
+            await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+            const command = ['-i', inputName];
+            
+            // 应用参数
+            const ac = outputChannels.value;
+            if (ac) command.push('-ac', ac);
+
+            const ar = outputSamplerate.value;
+            if (ar) command.push('-ar', ar);
+            
+            // 音频编码器
+            command.push('-acodec', format.codec);
+            
+            // 比特率（仅有损格式）
+            const ba = outputBitrate.value;
+            if (ba && format.supportsBitrate) {
+                command.push('-b:a', ba);
+            }
+            
+            // 无损格式特殊处理
+            if (outputFormat.value === 'flac') {
+                command.push('-compression_level', '5'); // FLAC 压缩级别 0-12
+            } else if (outputFormat.value === 'aac') {
+                command.push('-strict', 'experimental'); // AAC 编码器兼容性
+            }
+
+            command.push(outputName);
+            
+            // 执行 FFmpeg 命令
+            await ffmpeg.exec(command);
+            
+            // 读取输出文件
+            const data = await ffmpeg.readFile(outputName);
+            
+            // 创建下载链接
+            const mimeType = {
+                mp3: 'audio/mpeg',
+                wav: 'audio/wav',
+                m4a: 'audio/mp4',
+                ogg: 'audio/ogg',
+                flac: 'audio/flac'
+            }[format.ext] || 'audio/*';
+            
+            const blob = new Blob([data.buffer], { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            
+            const baseName = file.name.replace(/\.[^/.]+$/, ''); // 去除原扩展名
+            const filename = `${baseName}_converted.${format.ext}`;
+            
+            return { blob, url, filename };
+            
+        } finally {
+            // 清理内存
+            try {
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) { /* 忽略清理错误 */ }
+        }
+    };
+
+    // 旧代码保留（不再使用）
+    const displayFileInfo = async () => {
+        const file = uploader.files[0];
+        if (!file) return;
+
+        // 1. 显示文件名
+        document.getElementById('info-name').innerText = file.name;
+        infoArea.classList.remove('hidden');
+
+        // 2. 运行 ffmpeg -i 获取元数据
+        const inputName = 'input.' + file.name.split('.').pop();
+        
+        // 写入文件到内存
+        await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+        // 清空日志区域，准备接收新的元数据
+        logEl.innerHTML = `正在解析 ${file.name} 的元数据...`;
+        
+        try {
+            // 运行 -i 命令，FFmpeg 会输出元数据到 stderr 并报错（正常行为）
+            await ffmpeg.exec(['-i', inputName]);
+        } catch (error) {
+            // 预期会失败（因为没有指定输出），但元数据已经在日志中了
+        }
+        
+        // 从日志中提取最后的输出信息
+        const logs = logEl.innerText;
+        const metadata = parseMetadata(logs);
+
+        // 更新 HTML
+        document.getElementById('info-duration').innerText = metadata.duration;
+        document.getElementById('info-samplerate').innerText = metadata.sampleRate;
+        document.getElementById('info-channels').innerText = metadata.channels;
+        document.getElementById('info-bitrate').innerText = metadata.bitrate;
+        
+        log('元数据解析完成。');
+        
+        // 清理内存中的临时文件
+        try {
+            await ffmpeg.deleteFile(inputName);
+        } catch (e) { /* 忽略清理错误 */ }
+    };
+    
+    // 绑定文件选择事件
+    uploader.addEventListener('change', displayFileInfo);
+
+
+    // ------------------------------------
+    // 3. 压缩逻辑 
+    // ------------------------------------
+    const compress = async () => {
+        const file = uploader.files[0];
+        if (!file) return alert('请先上传一个 MP3 文件');
+
+        btn.disabled = true;
+        btn.innerText = '压缩中...';
+        downloadArea.classList.add('hidden');
+        
+        // 清空日志，开始新的压缩任务
+        logEl.innerHTML = '--- 开始处理 ---';
+
+        try {
+            const inputName = 'input.' + file.name.split('.').pop();
+            const outputName = 'output.mp3';
+            
+            // 确保文件已写入内存
+            await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+            const command = ['-i', inputName];
+            
+            // --- 提取并应用新的参数 ---
+            
+            // 输出声道 (-ac N)
+            const ac = outputChannels.value;
+            if (ac) {
+                command.push('-ac', ac);
+                log(`-> 设置输出声道: ${ac}`);
+            }
+
+            // 采样率 (-ar HZ)
+            const ar = outputSamplerate.value;
+            if (ar) {
+                command.push('-ar', ar);
+                log(`-> 设置采样率: ${ar}`);
+            }
+            
+            // 比特率 (-b:a RATE)
+            const ba = outputBitrate.value;
+            if (ba) {
+                command.push('-b:a', ba);
+                log(`-> 设置比特率: ${ba}`);
+            }
+
+            // --- 最终输出 ---
+            command.push(outputName);
+            
+            // 执行 FFmpeg 命令
+            await ffmpeg.exec(command);
+            
+            // 读取输出文件
+            const data = await ffmpeg.readFile(outputName);
+            
+            // 创建下载链接 (保持不变)
+            const blob = new Blob([data.buffer], { type: 'audio/mp3' });
+            const url = URL.createObjectURL(blob);
+            
+            downloadLink.href = url;
+            downloadLink.download = `compressed_${ba || 'original'}_${file.name}`;
+            
+            const originalSize = (file.size / 1024 / 1024).toFixed(2);
+            const newSize = (blob.size / 1024 / 1024).toFixed(2);
+            document.getElementById('size-info').innerText = `原始大小: ${originalSize} MB -> 压缩后: ${newSize} MB`;
+            
+            downloadArea.classList.remove('hidden');
+            log('--- 处理完成 ---');
+        } catch (error) {
+            log(`处理出错: ${error.message}`);
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '开始压缩';
+            // 清理内存中的文件
+            try {
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) { /* 忽略清理错误 */ }
+        }
+    };
+
+    // 绑定事件
+    uploader.addEventListener('change', displayFileList);
+    btn.addEventListener('click', compressBatch);
+    
+    // 启动初始化
+    loadFFmpeg();
+</script>
+
+</body>
+</html>

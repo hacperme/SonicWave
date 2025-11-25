@@ -1,0 +1,13 @@
+services:
+  sonic-wave:
+    build: .
+    ports:
+      - "8089:8089"
+    environment:
+      - PORT=8089
+      - STATIC_DIR=/app
+    volumes:
+      # 可选：挂载自定义配置文件
+      - ./config.toml:/app/config.toml:ro
+    restart: unless-stopped
+    container_name: sonic-wave
