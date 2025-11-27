@@ -11,7 +11,10 @@ on:
 env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
-  IMAGE_NAME: hacperme/sonicwave
+  DOCKER_HUB_REGISTRY: docker.io
+  # 使用变量替代硬编码的用户名，提高灵活性
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || 'hacper' }}
+  DOCKER_HUB_REPO_NAME: sonic-wave
 
 jobs:
   # Rust 构建和检查 (Linux)
@@ -126,12 +129,38 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_HUB_REGISTRY }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Extract branch name
+        id: extract_branch_docker
+        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+        
+      - name: Debug info
+        run: |
+          echo "Docker Hub Username: ${{ env.DOCKER_HUB_USERNAME }}"
+          echo "Docker Hub Repo Name: ${{ env.DOCKER_HUB_REPO_NAME }}"
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "GitHub Repository: ${{ github.repository }}"
+          echo "Current branch: ${{ steps.extract_branch_docker.outputs.branch }}"
+          echo "Scanned Image Path: ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}:${{ steps.extract_branch_docker.outputs.branch }}"
+          echo "GITHUB_ACTOR: ${{ github.actor }}"
+          echo "Runner Name: ${{ runner.name }}"
+      
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository }}
+            ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -151,6 +180,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          provenance: false
 
   # 安全扫描
   security-scan:
@@ -169,7 +199,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.extract_branch.outputs.branch }}
+          image-ref: ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}:${{ steps.extract_branch.outputs.branch }}
           format: 'sarif'
           output: 'trivy-results.sarif'
 
