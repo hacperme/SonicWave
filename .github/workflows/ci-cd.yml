@@ -12,7 +12,9 @@ env:
   CARGO_TERM_COLOR: always
   REGISTRY: ghcr.io
   DOCKER_HUB_REGISTRY: docker.io
-  IMAGE_NAME: hacperme/sonicwave
+  # 使用变量替代硬编码的用户名，提高灵活性
+  DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME || 'hacper' }}
+  DOCKER_HUB_REPO_NAME: sonic-wave
 
 jobs:
   # Rust 构建和检查 (Linux)
@@ -136,13 +138,20 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Debug info
+        run: |
+          echo "Docker Hub Username: ${{ env.DOCKER_HUB_USERNAME }}"
+          echo "Docker Hub Repo Name: ${{ env.DOCKER_HUB_REPO_NAME }}"
+          echo "Event name: ${{ github.event_name }}"
+          echo "Ref: ${{ github.ref }}"
+      
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ${{ env.IMAGE_NAME }}
+            ${{ env.REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}
+            ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -181,7 +190,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.extract_branch.outputs.branch }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}:${{ steps.extract_branch.outputs.branch }}
           format: 'sarif'
           output: 'trivy-results.sarif'
 
