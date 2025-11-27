@@ -138,6 +138,10 @@ jobs:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
 
+      - name: Extract branch name
+        id: extract_branch_docker
+        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+        
       - name: Debug info
         run: |
           echo "Docker Hub Username: ${{ env.DOCKER_HUB_USERNAME }}"
@@ -145,8 +149,8 @@ jobs:
           echo "Event name: ${{ github.event_name }}"
           echo "Ref: ${{ github.ref }}"
           echo "GitHub Repository: ${{ github.repository }}"
-          echo "GHCR Image Path: ${{ env.REGISTRY }}/${{ github.repository }}"
-          echo "Docker Hub Image Path: ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}"
+          echo "Current branch: ${{ steps.extract_branch_docker.outputs.branch }}"
+          echo "Scanned Image Path: ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}:${{ steps.extract_branch_docker.outputs.branch }}"
           echo "GITHUB_ACTOR: ${{ github.actor }}"
           echo "Runner Name: ${{ runner.name }}"
       
@@ -195,7 +199,7 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.extract_branch.outputs.branch }}
+          image-ref: ${{ env.DOCKER_HUB_REGISTRY }}/${{ env.DOCKER_HUB_USERNAME }}/${{ env.DOCKER_HUB_REPO_NAME }}:${{ steps.extract_branch.outputs.branch }}
           format: 'sarif'
           output: 'trivy-results.sarif'
 
