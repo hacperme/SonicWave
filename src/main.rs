@@ -1,12 +1,61 @@
-use axum::http::{header, HeaderValue};
+use axum::body::Body;
+use axum::http::{header, HeaderValue, Request, Response};
 use axum::{routing::get_service, Router};
 use serde::Deserialize;
 use std::fs;
 use std::net::SocketAddr;
+use std::task::{Context, Poll};
 use tower::ServiceBuilder;
+use tower::Service;
 use tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+// 自定义中间件：根据文件类型设置不同的缓存策略
+#[derive(Clone)]
+struct CacheControlService<S> {
+    inner: S,
+    static_cache: String,
+    html_cache: String,
+}
+
+impl<S> Service<Request<Body>> for CacheControlService<S>
+where
+    S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let path = req.uri().path().to_string();
+        let static_cache = self.static_cache.clone();
+        let html_cache = self.html_cache.clone();
+
+        Box::pin(async move {
+            let mut response = inner.call(req).await?;
+            
+            // 根据文件扩展名设置缓存策略
+            let cache_value = if path.ends_with(".html") || path.ends_with("/") || !path.contains('.') {
+                &html_cache
+            } else {
+                &static_cache
+            };
+
+            if let Ok(header_value) = HeaderValue::from_str(cache_value) {
+                response.headers_mut().insert(header::CACHE_CONTROL, header_value);
+            }
+
+            Ok(response)
+        })
+    }
+}
 
 #[derive(Deserialize, Debug)]
 struct Config {
@@ -14,10 +63,16 @@ struct Config {
     static_dir: Option<String>,
     #[serde(default = "default_cache_control")]
     cache_control: String,
+    #[serde(default = "default_html_cache_control")]
+    html_cache_control: String,
 }
 
 fn default_cache_control() -> String {
     "public, max-age=31536000, immutable".to_string()
+}
+
+fn default_html_cache_control() -> String {
+    "no-cache, must-revalidate".to_string()
 }
 
 impl Default for Config {
@@ -26,6 +81,7 @@ impl Default for Config {
             port: Some(8089),
             static_dir: Some(".".to_string()),
             cache_control: default_cache_control(),
+            html_cache_control: default_html_cache_control(),
         }
     }
 }
@@ -75,17 +131,19 @@ async fn main() {
     let config = load_config();
     let port = config.port.unwrap_or(8089);
     let static_dir = config.static_dir.unwrap_or_else(|| ".".to_string());
-    let cache_control = config.cache_control;
+    let cache_control = config.cache_control.clone();
+    let html_cache_control = config.html_cache_control.clone();
 
     info!("Starting Sonic Wave server");
     info!("Port: {}", port);
     info!("Static directory: {}", static_dir);
-    info!("Cache-Control: {}", cache_control);
+    info!("Cache-Control (static): {}", cache_control);
+    info!("Cache-Control (HTML): {}", html_cache_control);
 
     // 配置静态文件服务
     let serve_dir = ServeDir::new(&static_dir);
 
-    // 构建路由，添加 COOP/COEP headers
+    // 构建路由，添加 COOP/COEP headers 和动态缓存策略
     let app = Router::new().fallback_service(
         ServiceBuilder::new()
             .layer(SetResponseHeaderLayer::if_not_present(
@@ -96,12 +154,13 @@ async fn main() {
                 header::HeaderName::from_static("cross-origin-embedder-policy"),
                 HeaderValue::from_static("require-corp"),
             ))
-            .layer(SetResponseHeaderLayer::overriding(
-                header::CACHE_CONTROL,
-                HeaderValue::from_str(&cache_control).unwrap_or_else(|_| {
-                    HeaderValue::from_static("public, max-age=31536000, immutable")
-                }),
-            ))
+            .layer(tower::layer::layer_fn(move |service| {
+                CacheControlService {
+                    inner: service,
+                    static_cache: cache_control.clone(),
+                    html_cache: html_cache_control.clone(),
+                }
+            }))
             .service(get_service(serve_dir)),
     );
 
@@ -111,7 +170,9 @@ async fn main() {
     println!("🌐 Listening on: http://0.0.0.0:{}", port);
     println!("📁 Static directory: {}", static_dir);
     println!("🔒 Headers: COOP/COEP enabled");
-    println!("💾 Cache-Control: {}", cache_control);
+    println!("💾 Cache-Control:");
+    println!("   HTML files: {}", config.html_cache_control);
+    println!("   Static assets: {}", config.cache_control);
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("✨ Configuration priority: ENV > config.toml > default");
     println!("   PORT={}", port);
