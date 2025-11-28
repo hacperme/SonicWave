@@ -5,8 +5,8 @@ use serde::Deserialize;
 use std::fs;
 use std::net::SocketAddr;
 use std::task::{Context, Poll};
-use tower::ServiceBuilder;
 use tower::Service;
+use tower::ServiceBuilder;
 use tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -26,7 +26,9 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -40,16 +42,19 @@ where
 
         Box::pin(async move {
             let mut response = inner.call(req).await?;
-            
+
             // 根据文件扩展名设置缓存策略
-            let cache_value = if path.ends_with(".html") || path.ends_with("/") || !path.contains('.') {
-                &html_cache
-            } else {
-                &static_cache
-            };
+            let cache_value =
+                if path.ends_with(".html") || path.ends_with("/") || !path.contains('.') {
+                    &html_cache
+                } else {
+                    &static_cache
+                };
 
             if let Ok(header_value) = HeaderValue::from_str(cache_value) {
-                response.headers_mut().insert(header::CACHE_CONTROL, header_value);
+                response
+                    .headers_mut()
+                    .insert(header::CACHE_CONTROL, header_value);
             }
 
             Ok(response)
@@ -154,12 +159,10 @@ async fn main() {
                 header::HeaderName::from_static("cross-origin-embedder-policy"),
                 HeaderValue::from_static("require-corp"),
             ))
-            .layer(tower::layer::layer_fn(move |service| {
-                CacheControlService {
-                    inner: service,
-                    static_cache: cache_control.clone(),
-                    html_cache: html_cache_control.clone(),
-                }
+            .layer(tower::layer::layer_fn(move |service| CacheControlService {
+                inner: service,
+                static_cache: cache_control.clone(),
+                html_cache: html_cache_control.clone(),
             }))
             .service(get_service(serve_dir)),
     );
