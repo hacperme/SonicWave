@@ -268,28 +268,45 @@
     // ------------------------------------
     // 1. 初始化 FFmpeg (使用绝对路径加载)
     // ------------------------------------
-    const loadFFmpeg = async () => {
+    const initFFmpeg = async (silent = false) => {
+        // 如果已存在实例，先清理
+        if (ffmpeg) {
+            try {
+                await ffmpeg.terminate();
+            } catch (e) {
+                console.warn('FFmpeg terminate error:', e);
+            }
+        }
+        
         ffmpeg = new FFmpeg();
         
-        ffmpeg.on('log', ({ message }) => log(message));
+        if (!silent) {
+            ffmpeg.on('log', ({ message }) => log(message));
+        }
         ffmpeg.on('progress', ({ progress }) => log(`处理进度: ${(progress * 100).toFixed(1)}%`));
 
         try {
-            // 使用绝对路径加载核心文件 (修复了 Worker 路径问题)
+            // 使用绝对路径加载核心文件
             await ffmpeg.load({
                 coreURL: '/assets/ffmpeg-core.js',
                 wasmURL: '/assets/ffmpeg-core.wasm',
             });
             
-            log('FFmpeg 核心加载成功！请选择文件。');
-            btn.innerText = '开始压缩';
-            btn.disabled = false;
+            if (!silent) {
+                log('FFmpeg 核心加载成功！请选择文件。');
+                btn.innerText = '开始压缩';
+                btn.disabled = false;
+            }
+            return true;
         } catch (e) {
             log(`加载失败: ${e.message || e}`);
             log("请检查服务器配置或 assets 文件夹。");
             console.error(e);
+            return false;
         }
     };
+    
+    const loadFFmpeg = () => initFFmpeg(false);
 
     // ------------------------------------
     // 文件选择处理
@@ -503,6 +520,14 @@
         for (let i = 0; i < selectedFiles.length; i++) {
             const file = selectedFiles[i];
             
+            // 每10个文件重新初始化FFmpeg以清空内存
+            if (i > 0 && i % 10 === 0) {
+                log(`\n🔄 已处理 ${i} 个文件，重新初始化 FFmpeg 以释放内存...`);
+                await initFFmpeg(true);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                log('✓ FFmpeg 重新初始化完成');
+            }
+            
             // 更新进度
             const progress = ((i / selectedFiles.length) * 100).toFixed(0);
             progressFill.style.width = progress + '%';
@@ -531,6 +556,9 @@
                     <a href="${result.url}" download="${result.filename}">📥 下载</a>
                 `;
                 resultsContainer.appendChild(resultDiv);
+                
+                // 适度延迟（已有 FFmpeg 重初始化机制）
+                await new Promise(resolve => setTimeout(resolve, 50));
                 
             } catch (error) {
                 updateFileStatus(i, 'error');
@@ -609,8 +637,9 @@
                 return await compressSingleFile(file);
             } catch (error) {
                 if (attempt < maxRetries) {
-                    log(`⚠️ 第 ${attempt + 1} 次尝试失败，重试中...`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    log(`⚠️ 第 ${attempt + 1} 次尝试失败，等待${(attempt + 1) * 2}秒后重试...`);
+                    // 重试时增加更长的延迟，给 WASM 更多时间释放内存
+                    await new Promise(resolve => setTimeout(resolve, (attempt + 1) * 2000));
                 } else {
                     throw error;
                 }
@@ -658,10 +687,20 @@
             // 执行 FFmpeg 命令
             await ffmpeg.exec(command);
             
-            // 读取输出文件
+            // 读取输出文件并立即复制到独立内存
             const data = await ffmpeg.readFile(outputName);
+            // 强制拷贝：创建新的 Uint8Array，完全独立于 WASM 内存
+            const dataCopy = new Uint8Array(data);
             
-            // 创建下载链接
+            // 立即删除 WASM 文件，释放 WASM 内存
+            try {
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) {
+                console.warn('清理文件失败:', e);
+            }
+            
+            // 创建下载链接（使用拷贝的数据）
             const mimeType = {
                 mp3: 'audio/mpeg',
                 wav: 'audio/wav',
@@ -670,7 +709,7 @@
                 flac: 'audio/flac'
             }[format.ext] || 'audio/*';
             
-            const blob = new Blob([data.buffer], { type: mimeType });
+            const blob = new Blob([dataCopy], { type: mimeType });
             const url = URL.createObjectURL(blob);
             
             const baseName = file.name.replace(/\.[^/.]+$/, ''); // 去除原扩展名
@@ -678,12 +717,13 @@
             
             return { blob, url, filename };
             
-        } finally {
-            // 清理内存
+        } catch (error) {
+            // 确保错误时也清理
             try {
                 await ffmpeg.deleteFile(inputName);
                 await ffmpeg.deleteFile(outputName);
             } catch (e) { /* 忽略清理错误 */ }
+            throw error;
         }
     };
 
@@ -786,11 +826,20 @@
             // 执行 FFmpeg 命令
             await ffmpeg.exec(command);
             
-            // 读取输出文件
+            // 读取输出文件并立即复制到独立内存
             const data = await ffmpeg.readFile(outputName);
+            const dataCopy = new Uint8Array(data);
             
-            // 创建下载链接 (保持不变)
-            const blob = new Blob([data.buffer], { type: 'audio/mp3' });
+            // 立即删除文件释放 WASM 内存
+            try {
+                await ffmpeg.deleteFile(inputName);
+                await ffmpeg.deleteFile(outputName);
+            } catch (e) {
+                console.warn('清理文件失败:', e);
+            }
+            
+            // 创建下载链接（使用拷贝的数据）
+            const blob = new Blob([dataCopy], { type: 'audio/mp3' });
             const url = URL.createObjectURL(blob);
             
             downloadLink.href = url;
@@ -804,14 +853,14 @@
             log('--- 处理完成 ---');
         } catch (error) {
             log(`处理出错: ${error.message}`);
-        } finally {
-            btn.disabled = false;
-            btn.innerText = '开始压缩';
-            // 清理内存中的文件
+            // 错误时尝试清理
             try {
                 await ffmpeg.deleteFile(inputName);
                 await ffmpeg.deleteFile(outputName);
             } catch (e) { /* 忽略清理错误 */ }
+        } finally {
+            btn.disabled = false;
+            btn.innerText = '开始压缩';
         }
     };
 
